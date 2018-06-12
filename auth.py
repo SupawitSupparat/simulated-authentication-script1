@@ -5,7 +5,11 @@ from pyrad.client import Client
 from pyrad.dictionary import Dictionary
 from concurrent.futures import ThreadPoolExecutor
 from Queue import Queue
-from multiprocessing import Pool
+from threading import Thread
+from multiprocessing.dummy import Pool as ThreadPool 
+from twisted.internet import task
+from twisted.internet import reactor
+from multiprocessing import Process, Queue
 import threading
 import random
 import socket
@@ -16,6 +20,7 @@ import mysql.connector
 import time
 import fire
 import concurrent.futures
+import multiprocessing
 
 start_time = time.time()
 
@@ -23,6 +28,8 @@ class Script(object):
     success = 0
     denied = 0
     session = 0
+    concurrent = 300
+    timeout = 60.0
 
     def __init__(self, username, password,request,server,secret,timeout,auth_port = 1812,acct_port = 1813):
       self.username = username
@@ -35,25 +42,37 @@ class Script(object):
       self.timeout = timeout
 
     def task(self):
+        for i in range(60):
           srv = Client(server=self.server, secret=self.secret, dict=Dictionary("dictionary"))
           req = srv.CreateAuthPacket(code=pyrad.packet.AccessRequest, User_Name=self.username)
           req["User-Password"] = req.PwCrypt(self.password)
           self.authandacct(srv,req)
-    
+        
     def login(self):
-        self.task()
-       
+      q = Queue()
+      process_one = Process(target=self.task())
+      process_two = Process(target=self.task())
+      process_three = Process(target=self.task())
+      process_four = Process(target=self.task())
+      process_five = Process(target=self.task())
+      process_one.start()
+      process_two.start()
+      process_three.start()
+      process_four.start()
+      process_five.start()
+      q.close()
+      q.join_thread()
 
+      process_one.join()
+      process_two.join()
+      process_three.join()
+      process_four.join()
+      process_five.join()
 
+      
     def auth(self,srv,req):
-       
         self.session += 1    
-        try:
-            reply = srv.SendPacket(req)
-        except pyrad.client.Timeout:
-            sys.exit(1)
-        except socket.error :
-            sys.exit(1)
+        reply = srv.SendPacket(req)
         if reply.code == pyrad.packet.AccessAccept:
             print("Access accepted")
             self.success += 1
@@ -65,7 +84,7 @@ class Script(object):
         print("Sessions transmitted: : ", self.session)
         print("Responses received : ", self.success)
         rate = self.success/self.session*100
-        print("Responses received rate: ", rate)
+        print("Responses received rate: ", self.success/self.session*100)
         print("Timeout %s seconds " % (time.time() - start_time))
       
     def acct(self,srv, req):
@@ -84,6 +103,7 @@ class Script(object):
             self.auth(srv,req) 
         else:
             self.acct(srv,req)
+
 
 if __name__ == '__main__':
    fire.Fire(Script)
