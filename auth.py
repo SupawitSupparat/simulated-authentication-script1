@@ -28,10 +28,10 @@ class Script(object):
     success = 0
     denied = 0
     session = 0
-    concurrent = 300
     timeout = 60.0
     threads = []
-    def __init__(self, username, password,request,server,secret,timeout,auth_port = 1812,acct_port = 1813):
+
+    def __init__(self, username, password,request,server,secret,concurrent,timeout,auth_port = 1812,acct_port = 1813):
       self.username = username
       self.password = password
       self.acct_port = auth_port
@@ -39,26 +39,28 @@ class Script(object):
       self.request = request
       self.server = server
       self.secret = secret
-      self.timeout = timeout
-
-    def task(self):
-        for i in range(60):
-          srv = Client(server=self.server, secret=self.secret, dict=Dictionary("dictionary"))
-          req = srv.CreateAuthPacket(code=pyrad.packet.AccessRequest, User_Name=self.username)
-          req["User-Password"] = req.PwCrypt(self.password)
-          self.authandacct(srv,req)
+      self.timeout = timeout/1000
+      self.concurrent = concurrent
         
     def login(self):
-            for i in range (5):
-             t = threading.Thread(target = self.task())
-             self.threads.append(t)
-             t.start()
-            
-            print ("Start ",time.strftime("%d/%m/%Y"),time.strftime("%H:%M:%S"))
-            print("Sessions transmitted: : ", self.session)
-            print("Responses received : ", self.success)
-            print("Responses received rate: ", self.success/self.session*100)
-            print("Timeout %s seconds " % (time.time() - start_time))
+        srv = Client(server=self.server, secret=self.secret, dict=Dictionary("dictionary"))
+        req = srv.CreateAuthPacket(code=pyrad.packet.AccessRequest, User_Name=self.username)
+        req["User-Password"] = req.PwCrypt(self.password)
+
+        
+
+        for i in range(self.concurrent):
+           if time.time() - start_time < self.timeout :   
+            t = Thread(target=self.authandacct(srv,req))
+            t.daemon = True
+            t.start()
+           else: i = self.concurrent
+
+        print ("Start ",time.strftime("%d/%m/%Y"),time.strftime("%H:%M:%S"))
+        print("Sessions transmitted: : ", self.session)
+        print("Responses received : ", self.success)
+        print("Responses received rate: ", self.success/self.session*100)
+        print("Timeout %.4s seconds " % (time.time() - start_time))
 
 
     def auth(self,srv,req):
