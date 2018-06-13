@@ -3,14 +3,8 @@ from __future__ import print_function
 from __future__ import division
 from pyrad.client import Client
 from pyrad.dictionary import Dictionary
-from concurrent.futures import ThreadPoolExecutor
 from Queue import Queue
 from threading import Thread
-from multiprocessing.dummy import Pool as ThreadPool 
-from twisted.internet import task
-from twisted.internet import reactor
-from multiprocessing import Process, Queue
-import threading
 import random
 import socket
 import sys
@@ -19,8 +13,10 @@ import pyrad.packet
 import mysql.connector
 import time
 import fire
-import concurrent.futures
-import multiprocessing
+import argparse
+import ast
+
+
 
 start_time = time.time()
 
@@ -41,53 +37,63 @@ class Script(object):
       self.secret = secret
       self.timeout = timeout/1000
       self.concurrent = concurrent
-        
+   
+    def SendPacket(self,srv, req):
+        try:
+            srv.SendPacket(req)
+        except pyrad.client.Timeout:
+            print("RADIUS server does not reply")
+            sys.exit(1)
+        except socket.error as error:
+            print("Network error: " + error[1])
+            sys.exit(1)
+
     def login(self):
-        srv = Client(server=self.server, secret=self.secret, dict=Dictionary("dictionary"))
-        req = srv.CreateAuthPacket(code=pyrad.packet.AccessRequest, User_Name=self.username)
-        req["User-Password"] = req.PwCrypt(self.password)
-
-        
-
-        for i in range(self.concurrent):
-           if time.time() - start_time < self.timeout :   
-            t = Thread(target=self.authandacct(srv,req))
-            t.daemon = True
-            t.start()
-           else: i = self.concurrent
-
-        print ("Start ",time.strftime("%d/%m/%Y"),time.strftime("%H:%M:%S"))
-        print("Sessions transmitted: : ", self.session)
-        print("Responses received : ", self.success)
-        print("Responses received rate: ", self.success/self.session*100)
-        print("Timeout %.4s seconds " % (time.time() - start_time))
-
-
+         srv = Client(server=self.server, secret=self.secret, dict=Dictionary("dictionary"))
+         req = srv.CreateAuthPacket(code=pyrad.packet.AccessRequest, User_Name=self.username)
+         req["User-Password"] = req.PwCrypt(self.password)
+         t = Thread(target=self.authandacct(srv,req))
+         t.daemon = True
+         t.start()
+         if(self.request == 'auth'):
+            print("Start :",time.strftime("%d/%m/%Y"),time.strftime("%H:%M:%S"))
+            print("Request type : ",self.request)
+            print("Sessions transmitted : ", self.session)
+            print("Responses received : ", self.success)
+            print("Responses received rate: %s %% " % (self.success/self.session*100))
+            print("Timeout %.4s seconds " % (time.time() - start_time))
+       
     def auth(self,srv,req):
-        self.session += 1    
-        reply = srv.SendPacket(req)
-        if reply.code == pyrad.packet.AccessAccept:
-            self.success += 1
-        else:
-            self.denied +=1
-      
-    # def acct(self,srv, req):
-    #  print("Sending accounting start packet")
-    #  req["Acct-Status-Type"] = "Start"
-    #  print("Sending accounting stop packet")
-    #  req["Acct-Status-Type"] = "Stop"
-    #  req["Acct-Input-Octets"] = random.randrange(2**10, 2**30)
-    #  req["Acct-Output-Octets"] = random.randrange(2**10, 2**30)
-    #  req["Acct-Session-Time"] = random.randrange(120, 3600)
-    #  req["Acct-Terminate-Cause"] = random.choice(["User-Request", "Idle-Timeout"])
+        for i in range(self.concurrent):
+         if time.time() - start_time < self.timeout :
+              self.session += 1    
+              reply = srv.SendPacket(req)
+              if reply.code == pyrad.packet.AccessAccept:
+                  self.success += 1
+              else:
+                  self.denied +=1
+         else: i = self.concurrent
 
-    
+    def acct(self,srv, req):
+        print("Sending accounting start packet")
+        req["Acct-Status-Type"] = "Start"
+        self.SendPacket(srv, req)
+        print("Sending accounting stop packet")
+        req["Acct-Status-Type"] = "Stop"
+        req["Acct-Input-Octets"] = random.randrange(2**10, 2**30)
+        req["Acct-Output-Octets"] = random.randrange(2**10, 2**30)
+        req["Acct-Session-Time"] = random.randrange(120, 3600)
+        req["Acct-Terminate-Cause"] = random.choice(["User-Request", "Idle-Timeout"])
+        self.SendPacket(srv, req)
+
     def authandacct(self,srv,req):
-        if self.request == 'auth':
-            self.auth(srv,req) 
-        # else:
-        #     self.acct(srv,req)
+     if (self.request == 'auth'):
+         self.auth(srv,req)
+     elif(self.request == "acct"):
+         self.acct(srv,req)
+
 
 
 if __name__ == '__main__':
    fire.Fire(Script)
+  
